@@ -1,0 +1,15 @@
+{
+  "name": "billywear-kklla-sales-netlify",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check netlify/functions/api.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.1"
+  },
+  "devDependencies": {
+    "netlify-cli": "^23.6.0"
+  }
+}
