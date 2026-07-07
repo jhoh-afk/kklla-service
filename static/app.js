@@ -637,7 +637,8 @@ function renderAll() {
 
 async function handleLogin(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   try {
     const payload = await api("/api/login", { method: "POST", body: JSON.stringify(data) });
     state.me = payload.user;
@@ -651,12 +652,13 @@ async function handleLogin(event) {
 
 async function handleSignup(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   data.agreeOwnership = Boolean(data.agreeOwnership);
   data.agreeSettlement = Boolean(data.agreeSettlement);
   try {
     await api("/api/signup", { method: "POST", body: JSON.stringify(data) });
-    event.currentTarget.reset();
+    form.reset();
     alert("가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.");
     if (state.me && isManager()) await loadBootstrap();
   } catch (error) {
@@ -672,12 +674,13 @@ async function handleLogout() {
 
 async function handleActivitySubmit(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   try {
     await api("/api/activities", { method: "POST", body: JSON.stringify(data) });
-    event.currentTarget.summary.value = "";
-    event.currentTarget.nextAction.value = "";
-    event.currentTarget.locationNote.value = "";
+    form.summary.value = "";
+    form.nextAction.value = "";
+    form.locationNote.value = "";
     await loadBootstrap();
     setView("accounts");
     showToast("영업 활동이 저장되었습니다.");
@@ -688,12 +691,13 @@ async function handleActivitySubmit(event) {
 
 async function handleAccountSubmit(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   data.expectedAmount = Number(data.expectedAmount || 0);
   try {
     const payload = await api("/api/accounts", { method: "POST", body: JSON.stringify(data) });
     state.selectedAccountId = payload.account.id;
-    event.currentTarget.reset();
+    form.reset();
     await loadBootstrap();
     setView("accounts");
     showToast(payload.duplicates?.length ? "거래처가 등록되었고 중복 검토가 필요합니다." : "거래처가 등록되었습니다.");
@@ -704,7 +708,8 @@ async function handleAccountSubmit(event) {
 
 async function handleContractSubmit(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   const shares = {
     originator: Number(data.originatorShare),
     closer: Number(data.closerShare),
@@ -726,7 +731,7 @@ async function handleContractSubmit(event) {
   };
   try {
     await api("/api/contracts", { method: "POST", body: JSON.stringify(payload) });
-    event.currentTarget.reset();
+    form.reset();
     await loadBootstrap();
     showToast("정산 대기 계약이 등록되었습니다.");
   } catch (error) {
