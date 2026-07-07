@@ -489,6 +489,11 @@ function renderAccountDetail() {
       <div class="row-actions">
         <button class="small-button" data-account-action="advance-status" type="button">상태 변경</button>
         <button class="small-button" data-account-action="extend-lock" type="button">담당권 30일 연장</button>
+        ${
+          isManager()
+            ? `<button class="small-button danger-button" data-account-action="delete" type="button">거래처 삭제</button>`
+            : ""
+        }
       </div>
       <h3>활동 히스토리</h3>
       <div class="timeline">
@@ -541,6 +546,7 @@ function renderPeople() {
                     ? `<button class="small-button" data-people-action="active" data-user-id="${html(person.id)}" type="button">승인</button>`
                     : `<button class="small-button" data-people-action="suspended" data-user-id="${html(person.id)}" type="button">중지</button>`
                 }
+                <button class="small-button danger-button" data-people-action="delete" data-user-id="${html(person.id)}" data-user-name="${html(person.name)}" type="button">삭제</button>
               </div>
             </td>
           </tr>
@@ -742,6 +748,20 @@ async function handleContractSubmit(event) {
 async function handleAccountAction(action) {
   const item = account(state.selectedAccountId);
   if (!item) return;
+  if (action === "delete") {
+    const confirmed = confirm(`${item.name} 거래처를 삭제할까요?\n\n이 거래처의 활동 기록과 계약/정산 기록도 함께 삭제됩니다.`);
+    if (!confirmed) return;
+    try {
+      await api(`/api/accounts/${item.id}`, { method: "DELETE" });
+      state.selectedAccountId = null;
+      await loadBootstrap();
+      setView("accounts");
+      showToast("거래처가 삭제되었습니다.");
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
   const body = {};
   if (action === "advance-status") {
     const index = STATUS_ORDER.indexOf(item.status);
@@ -760,6 +780,19 @@ async function handleAccountAction(action) {
 }
 
 async function handlePeopleAction(button) {
+  if (button.dataset.peopleAction === "delete") {
+    const name = button.dataset.userName || "직원";
+    const confirmed = confirm(`${name} 직원을 삭제할까요?\n\n이 직원과 연결된 거래처, 활동 기록, 계약/정산 기록도 함께 삭제됩니다.`);
+    if (!confirmed) return;
+    try {
+      await api(`/api/users/${button.dataset.userId}`, { method: "DELETE" });
+      await loadBootstrap();
+      showToast("직원이 삭제되었습니다.");
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
   try {
     await api(`/api/users/${button.dataset.userId}/status`, {
       method: "PATCH",
