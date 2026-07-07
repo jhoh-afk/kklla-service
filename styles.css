@@ -275,6 +275,12 @@ h3 {
   font-size: 12px;
 }
 
+.danger-button {
+  border-color: #111;
+  background: #111;
+  color: #fff;
+}
+
 .icon-button {
   width: 36px;
   padding: 0;
