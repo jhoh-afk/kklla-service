@@ -1,5 +1,4 @@
 [build]
-  base = "outputs/kklla-sales-netlify"
   publish = "static"
 
 [functions]
