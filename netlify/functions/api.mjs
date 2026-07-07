@@ -660,6 +660,33 @@ async function handleUpdateUserStatus(req, sql, user, targetId) {
   return json({ user: serializeUser(updated[0]) });
 }
 
+async function handleDeleteUser(req, sql, user, targetId) {
+  requireManager(user);
+  if (targetId === user.id || targetId === "admin") throw apiError(400, "관리자 계정은 삭제할 수 없습니다.");
+  const rows = await sql`SELECT * FROM users WHERE id = ${targetId}`;
+  const target = rows[0];
+  if (!target) throw apiError(404, "사용자를 찾을 수 없습니다.");
+  if (target.role !== "sales") throw apiError(400, "영업사원 계정만 삭제할 수 있습니다.");
+
+  const accountRows = await sql`SELECT id FROM accounts WHERE owner_id = ${targetId} OR originator_id = ${targetId}`;
+  const accountIds = accountRows.map((item) => item.id);
+  if (accountIds.length) {
+    await sql`DELETE FROM contracts WHERE account_id = ANY(${accountIds})`;
+    await sql`DELETE FROM activities WHERE account_id = ANY(${accountIds})`;
+    await sql`DELETE FROM accounts WHERE id = ANY(${accountIds})`;
+  }
+  await sql`DELETE FROM activities WHERE rep_id = ${targetId}`;
+  await sql`
+    DELETE FROM contracts
+    WHERE originator_id = ${targetId} OR closer_id = ${targetId} OR manager_id = ${targetId}
+  `;
+  await sql`DELETE FROM sessions WHERE user_id = ${targetId}`;
+  await sql`DELETE FROM audit WHERE actor_id = ${targetId}`;
+  await sql`DELETE FROM users WHERE id = ${targetId}`;
+  await addAudit(sql, user.id, "직원 삭제", `${target.name} · ${target.email}`);
+  return json({ ok: true });
+}
+
 async function handleUpdateAccount(req, sql, user, accountId) {
   const data = await readJson(req);
   const rows = await sql`SELECT * FROM accounts WHERE id = ${accountId}`;
@@ -682,6 +709,18 @@ async function handleUpdateAccount(req, sql, user, accountId) {
   await addAudit(sql, user.id, "거래처 수정", account.name);
   const updated = await sql`SELECT * FROM accounts WHERE id = ${accountId}`;
   return json({ account: serializeAccount(updated[0]) });
+}
+
+async function handleDeleteAccount(req, sql, user, accountId) {
+  requireManager(user);
+  const rows = await sql`SELECT * FROM accounts WHERE id = ${accountId}`;
+  const account = rows[0];
+  if (!account) throw apiError(404, "거래처를 찾을 수 없습니다.");
+  await sql`DELETE FROM contracts WHERE account_id = ${accountId}`;
+  await sql`DELETE FROM activities WHERE account_id = ${accountId}`;
+  await sql`DELETE FROM accounts WHERE id = ${accountId}`;
+  await addAudit(sql, user.id, "거래처 삭제", account.name);
+  return json({ ok: true });
 }
 
 async function handleApproveContract(req, sql, user, contractId) {
@@ -758,8 +797,11 @@ export default async function handler(req) {
 
     const userStatusMatch = path.match(/^\/api\/users\/([^/]+)\/status$/);
     if (method === "PATCH" && userStatusMatch) return await handleUpdateUserStatus(req, sql, user, userStatusMatch[1]);
+    const userMatch = path.match(/^\/api\/users\/([^/]+)$/);
+    if (method === "DELETE" && userMatch) return await handleDeleteUser(req, sql, user, userMatch[1]);
     const accountMatch = path.match(/^\/api\/accounts\/([^/]+)$/);
     if (method === "PATCH" && accountMatch) return await handleUpdateAccount(req, sql, user, accountMatch[1]);
+    if (method === "DELETE" && accountMatch) return await handleDeleteAccount(req, sql, user, accountMatch[1]);
     const approveMatch = path.match(/^\/api\/contracts\/([^/]+)\/approve$/);
     if (method === "PATCH" && approveMatch) return await handleApproveContract(req, sql, user, approveMatch[1]);
 
