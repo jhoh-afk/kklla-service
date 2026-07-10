@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 const SESSION_COOKIE = "kklla_session";
 const SESSION_DAYS = 14;
 const TODAY = "2026-07-07";
+const ACCOUNT_STATUSES = ["신규", "접촉중", "샘플 전달", "견적중", "계약 협의", "계약완료", "보류", "실패", "중복 검토"];
 
 let schemaReady = false;
 
@@ -695,6 +696,7 @@ async function handleUpdateAccount(req, sql, user, accountId) {
   if (user.role !== "manager" && account.owner_id !== user.id) throw apiError(403, "내 담당 거래처만 수정할 수 있습니다.");
   if (data.ownerId && user.role !== "manager") throw apiError(403, "담당자 변경은 관리자만 가능합니다.");
   if (Object.hasOwn(data, "status")) {
+    if (!ACCOUNT_STATUSES.includes(data.status)) throw apiError(400, "거래처 상태 값이 올바르지 않습니다.");
     await sql`UPDATE accounts SET status = ${data.status}, updated_at = ${nowIso()} WHERE id = ${accountId}`;
   }
   if (Object.hasOwn(data, "lockUntil")) {
