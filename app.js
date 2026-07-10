@@ -66,6 +66,69 @@ function html(value) {
     .replaceAll("'", "&#039;");
 }
 
+function xml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function safeSheetName(value) {
+  return String(value || "Sheet")
+    .replace(/[\\/?*[\]:]/g, " ")
+    .slice(0, 31);
+}
+
+function excelCell(value, isHeader = false) {
+  const style = isHeader ? ' ss:StyleID="Header"' : "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `<Cell${style}><Data ss:Type="Number">${value}</Data></Cell>`;
+  }
+  return `<Cell${style}><Data ss:Type="String">${xml(value)}</Data></Cell>`;
+}
+
+function excelSheet(name, rows) {
+  const body = rows
+    .map((row, rowIndex) => `<Row>${row.map((value) => excelCell(value, rowIndex === 0)).join("")}</Row>`)
+    .join("");
+  return `<Worksheet ss:Name="${xml(safeSheetName(name))}"><Table>${body}</Table></Worksheet>`;
+}
+
+function buildExcelWorkbook(sheets) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:html="http://www.w3.org/TR/REC-html40">
+  <Styles>
+    <Style ss:ID="Header">
+      <Font ss:Bold="1"/>
+      <Interior ss:Color="#eeeeee" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>
+      </Borders>
+    </Style>
+  </Styles>
+  ${sheets.map((sheet) => excelSheet(sheet.name, sheet.rows)).join("")}
+</Workbook>`;
+}
+
+function downloadFile(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function showToast(message) {
   const toast = qs("#toast");
   toast.textContent = message;
@@ -487,8 +550,21 @@ function renderAccountDetail() {
           : ""
       }
       <div class="row-actions">
-        <button class="small-button" data-account-action="advance-status" type="button">상태 변경</button>
+        <div class="status-picker">
+          <button class="small-button" data-account-action="toggle-status-menu" type="button">상태 변경</button>
+          <div class="status-menu is-hidden" id="accountStatusMenu">
+            ${STATUS_ORDER.map(
+              (status) =>
+                `<button class="status-option ${status === item.status ? "is-current" : ""}" data-account-status="${html(status)}" type="button">${html(status)}</button>`,
+            ).join("")}
+          </div>
+        </div>
         <button class="small-button" data-account-action="extend-lock" type="button">담당권 30일 연장</button>
+        ${
+          isManager()
+            ? `<button class="small-button danger-button" data-account-action="delete" type="button">거래처 삭제</button>`
+            : ""
+        }
       </div>
       <h3>활동 히스토리</h3>
       <div class="timeline">
@@ -541,6 +617,7 @@ function renderPeople() {
                     ? `<button class="small-button" data-people-action="active" data-user-id="${html(person.id)}" type="button">승인</button>`
                     : `<button class="small-button" data-people-action="suspended" data-user-id="${html(person.id)}" type="button">중지</button>`
                 }
+                <button class="small-button danger-button" data-people-action="delete" data-user-id="${html(person.id)}" data-user-name="${html(person.name)}" type="button">삭제</button>
               </div>
             </td>
           </tr>
@@ -637,7 +714,8 @@ function renderAll() {
 
 async function handleLogin(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   try {
     const payload = await api("/api/login", { method: "POST", body: JSON.stringify(data) });
     state.me = payload.user;
@@ -651,12 +729,13 @@ async function handleLogin(event) {
 
 async function handleSignup(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   data.agreeOwnership = Boolean(data.agreeOwnership);
   data.agreeSettlement = Boolean(data.agreeSettlement);
   try {
     await api("/api/signup", { method: "POST", body: JSON.stringify(data) });
-    event.currentTarget.reset();
+    form.reset();
     alert("가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.");
     if (state.me && isManager()) await loadBootstrap();
   } catch (error) {
@@ -672,12 +751,13 @@ async function handleLogout() {
 
 async function handleActivitySubmit(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   try {
     await api("/api/activities", { method: "POST", body: JSON.stringify(data) });
-    event.currentTarget.summary.value = "";
-    event.currentTarget.nextAction.value = "";
-    event.currentTarget.locationNote.value = "";
+    form.summary.value = "";
+    form.nextAction.value = "";
+    form.locationNote.value = "";
     await loadBootstrap();
     setView("accounts");
     showToast("영업 활동이 저장되었습니다.");
@@ -688,12 +768,13 @@ async function handleActivitySubmit(event) {
 
 async function handleAccountSubmit(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   data.expectedAmount = Number(data.expectedAmount || 0);
   try {
     const payload = await api("/api/accounts", { method: "POST", body: JSON.stringify(data) });
     state.selectedAccountId = payload.account.id;
-    event.currentTarget.reset();
+    form.reset();
     await loadBootstrap();
     setView("accounts");
     showToast(payload.duplicates?.length ? "거래처가 등록되었고 중복 검토가 필요합니다." : "거래처가 등록되었습니다.");
@@ -704,7 +785,8 @@ async function handleAccountSubmit(event) {
 
 async function handleContractSubmit(event) {
   event.preventDefault();
-  const data = formData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = formData(form);
   const shares = {
     originator: Number(data.originatorShare),
     closer: Number(data.closerShare),
@@ -726,7 +808,7 @@ async function handleContractSubmit(event) {
   };
   try {
     await api("/api/contracts", { method: "POST", body: JSON.stringify(payload) });
-    event.currentTarget.reset();
+    form.reset();
     await loadBootstrap();
     showToast("정산 대기 계약이 등록되었습니다.");
   } catch (error) {
@@ -737,11 +819,25 @@ async function handleContractSubmit(event) {
 async function handleAccountAction(action) {
   const item = account(state.selectedAccountId);
   if (!item) return;
-  const body = {};
-  if (action === "advance-status") {
-    const index = STATUS_ORDER.indexOf(item.status);
-    body.status = STATUS_ORDER[Math.min(index + 1, STATUS_ORDER.length - 1)] || "접촉중";
+  if (action === "toggle-status-menu") {
+    qs("#accountStatusMenu")?.classList.toggle("is-hidden");
+    return;
   }
+  if (action === "delete") {
+    const confirmed = confirm(`${item.name} 거래처를 삭제할까요?\n\n이 거래처의 활동 기록과 계약/정산 기록도 함께 삭제됩니다.`);
+    if (!confirmed) return;
+    try {
+      await api(`/api/accounts/${item.id}`, { method: "DELETE" });
+      state.selectedAccountId = null;
+      await loadBootstrap();
+      setView("accounts");
+      showToast("거래처가 삭제되었습니다.");
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  const body = {};
   if (action === "extend-lock") {
     body.lockUntil = addDays(state.today, 30);
   }
@@ -754,7 +850,32 @@ async function handleAccountAction(action) {
   }
 }
 
+async function handleAccountStatusChange(status) {
+  const item = account(state.selectedAccountId);
+  if (!item || !STATUS_ORDER.includes(status)) return;
+  try {
+    await api(`/api/accounts/${item.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    await loadBootstrap();
+    showToast(`거래처 상태가 '${status}'로 변경되었습니다.`);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function handlePeopleAction(button) {
+  if (button.dataset.peopleAction === "delete") {
+    const name = button.dataset.userName || "직원";
+    const confirmed = confirm(`${name} 직원을 삭제할까요?\n\n이 직원과 연결된 거래처, 활동 기록, 계약/정산 기록도 함께 삭제됩니다.`);
+    if (!confirmed) return;
+    try {
+      await api(`/api/users/${button.dataset.userId}`, { method: "DELETE" });
+      await loadBootstrap();
+      showToast("직원이 삭제되었습니다.");
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
   try {
     await api(`/api/users/${button.dataset.userId}/status`, {
       method: "PATCH",
@@ -805,12 +926,141 @@ async function openSettlementExport() {
   }
 }
 
+async function downloadExcelExport() {
+  try {
+    const month = qs("#dashboardMonth").value || state.today.slice(0, 7);
+    const settlements = await api(`/api/settlements?month=${encodeURIComponent(month)}`);
+    const statusLabel = {
+      active: "활동중",
+      pending: "승인 대기",
+      suspended: "중지",
+    };
+    const contractStatusLabel = {
+      approved: "승인",
+      pending: "대기",
+    };
+    const sheets = [
+      {
+        name: "직원",
+        rows: [
+          ["이름", "역할", "상태", "이메일", "휴대폰", "주 담당 권역", "활동 가능 지역", "계약 형태", "이동 수단", "은행", "예금주", "계좌번호", "기존 인맥", "가입일", "승인일"],
+          ...state.users.map((item) => [
+            item.name,
+            item.role === "manager" ? "관리자" : "영업사원",
+            statusLabel[item.status] || item.status,
+            item.email,
+            item.phone,
+            item.region,
+            item.coverage,
+            item.workType,
+            item.transport,
+            item.bankName,
+            item.accountHolder,
+            item.accountNumber || item.accountNumberMasked,
+            item.existingNetwork,
+            item.joinedAt,
+            item.approvedAt,
+          ]),
+        ],
+      },
+      {
+        name: "거래처",
+        rows: [
+          ["거래처명", "유형", "지역", "주소", "담당자명", "연락처", "현재 담당", "최초 등록자", "상태", "예상 금액", "담당권 만료", "등록일", "수정일", "최근 활동"],
+          ...state.accounts.map((item) => {
+            const recent = lastActivity(item.id);
+            return [
+              item.name,
+              item.category,
+              item.region,
+              item.address,
+              item.contactName,
+              item.phone,
+              user(item.ownerId).name,
+              user(item.originatorId).name,
+              item.status,
+              item.expectedAmount,
+              item.lockUntil,
+              item.createdAt,
+              item.updatedAt,
+              recent ? `${recent.date} ${recent.type} ${recent.summary}` : "",
+            ];
+          }),
+        ],
+      },
+      {
+        name: "영업기록",
+        rows: [
+          ["일자", "영업사원", "거래처", "유형", "만난 사람", "영업 내용", "다음 액션", "다음 일정", "현장 메모", "기록일"],
+          ...state.activities.map((item) => [
+            item.date,
+            user(item.repId).name,
+            account(item.accountId)?.name || "",
+            item.type,
+            item.contact,
+            item.summary,
+            item.nextAction,
+            item.nextDate,
+            item.locationNote,
+            item.createdAt,
+          ]),
+        ],
+      },
+      {
+        name: "계약정산",
+        rows: [
+          ["계약일", "거래처", "금액", "상태", "최초 발굴자", "계약 성사자", "사후관리 담당", "발굴 배분", "성사 배분", "관리 배분", "메모", "등록일", "승인일"],
+          ...state.contracts.map((item) => [
+            item.date,
+            account(item.accountId)?.name || "",
+            item.amount,
+            contractStatusLabel[item.status] || item.status,
+            user(item.originatorId).name,
+            user(item.closerId).name,
+            user(item.managerId).name,
+            `${item.shares.originator}%`,
+            `${item.shares.closer}%`,
+            `${item.shares.manager}%`,
+            item.memo,
+            item.createdAt,
+            item.approvedAt,
+          ]),
+        ],
+      },
+      {
+        name: `${month} 정산`,
+        rows: [
+          ["정산월", "직원", "권역", "계약 참여", "정산 금액"],
+          ...settlements.rows.map((row) => [settlements.month, row.user.name, row.user.region, row.count, row.amount]),
+        ],
+      },
+      {
+        name: "변경이력",
+        rows: [
+          ["일시", "처리자", "구분", "내용"],
+          ...state.audit.map((item) => [item.date, user(item.actor_id).name, item.action, item.detail]),
+        ],
+      },
+    ];
+    const workbook = buildExcelWorkbook(sheets);
+    downloadFile(
+      `Billywear-KKLLA-sales-${state.today}.xls`,
+      workbook,
+      "application/vnd.ms-excel;charset=utf-8",
+    );
+    showToast("엑셀 파일을 다운로드했습니다.");
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 function bindEvents() {
   qs("#loginForm").addEventListener("submit", handleLogin);
   qs("#signupForm").addEventListener("submit", handleSignup);
   qs("#logoutBtn").addEventListener("click", handleLogout);
   qs("#refreshBtn").addEventListener("click", () => loadBootstrap().then(() => showToast("새로고침되었습니다.")));
   qs("#exportBtn").addEventListener("click", openSettlementExport);
+  qs("#excelDownloadBtn").addEventListener("click", downloadExcelExport);
   qs("#closeExportBtn").addEventListener("click", () => qs("#exportDialog").close());
 
   qsa(".nav-item").forEach((item) => item.addEventListener("click", () => setView(item.dataset.view)));
@@ -832,6 +1082,11 @@ function bindEvents() {
   });
 
   qs("#accountDetailPanel").addEventListener("click", (event) => {
+    const statusButton = event.target.closest("[data-account-status]");
+    if (statusButton) {
+      handleAccountStatusChange(statusButton.dataset.accountStatus);
+      return;
+    }
     const button = event.target.closest("[data-account-action]");
     if (!button) return;
     handleAccountAction(button.dataset.accountAction);
